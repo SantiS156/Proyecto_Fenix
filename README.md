@@ -9,3 +9,5 @@ Crear y activar un entorno virtual Python 3.11 o superior. Desde esta carpeta ej
 `python -m pytest -m base -q` verifica el apoyo ya implementado. `python -m pytest -m pendiente -q` falla inicialmente hasta completar contratos. No confundir esas marcas con aprobación del TP.
 
 La guía contiene los comandos exactos, matriz de pruebas, roles y requisitos del README definitivo que debe escribir el equipo. Reemplazar este README inicial por su documentación completa.
+# Proyecto_Fenix
+TP Final - Sistema de Autorreparación de Infraestructura
