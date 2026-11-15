@@ -43,9 +43,17 @@ def ttl_seconds(value: str) -> int:
     Notes:
         La CLI traduce ValidationError a parser.error para salir con código 2.
     """
-    # TODO I1-B: convertir con int y capturar ValueError con encadenamiento.
-    # Comprobar 60 <= ttl <= 600; no aceptar decimales ni valores negativos.
-    raise NotImplementedError("I1-B: validar TTL")  # Sustituir por la validación.
+    # Solo texto: int(60.9) truncaría a 60 sin avisar, y int(True) daría 1.
+    if not isinstance(value, str):
+        raise ValidationError("ttl debe ser texto con un entero")
+    try:
+        ttl = int(value)
+    except ValueError as error:
+        # "from error" conserva la causa original para diagnosticar.
+        raise ValidationError("ttl debe ser un entero") from error
+    if not 60 <= ttl <= 600:
+        raise ValidationError("ttl debe estar entre 60 y 600 segundos")
+    return ttl
 
 
 def utc_text(value: str) -> datetime:
