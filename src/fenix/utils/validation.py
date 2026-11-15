@@ -1,6 +1,6 @@
 """Contratos de validación a completar por el integrante 1."""
 import re  # Comprueba el formato de los identificadores.
-from datetime import datetime, timezone  # Trabaja con fechas conscientes de UTC.
+from datetime import datetime, timedelta, timezone  # Trabaja con fechas conscientes de UTC.
 from fenix.utils.errors import ValidationError  # Error público del dominio.
 
 
@@ -17,7 +17,7 @@ def identifier(value: str) -> str:
     Examples:
         identifier("grupo-01") devuelve "grupo-01"; "../ajeno" debe fallar.
     """
-    # Primero el tipo: si no es texto, re.fullmatch lanzaría TypeError (no del dominio).
+    # Primero el tipo si no es texto, re.fullmatch lanzaría TypeError (no del dominio).
     if not isinstance(value, str):
         raise ValidationError("identifier debe ser texto")
     # fullmatch exige que coincida TODO el texto.
@@ -43,7 +43,7 @@ def ttl_seconds(value: str) -> int:
     Notes:
         La CLI traduce ValidationError a parser.error para salir con código 2.
     """
-    # Solo texto: int(60.9) truncaría a 60 sin avisar, y int(True) daría 1.
+    # Solo texto int(60.9) truncaría a 60 sin avisar, y int(True) daría 1.
     if not isinstance(value, str):
         raise ValidationError("ttl debe ser texto con un entero")
     try:
@@ -67,6 +67,16 @@ def utc_text(value: str) -> datetime:
         ValidationError: Si falta zona, hay offset no nulo o formato inválido.
         NotImplementedError: Mientras no se complete TODO I1-C.
     """
-    # TODO I1-C: usar fromisoformat, reemplazando Z por +00:00.
-    # Rechazar tzinfo ausente y utcoffset distinto de timedelta(0).
-    raise NotImplementedError("I1-C: interpretar UTC")  # No usar hora local.
+    # Solo texto cualquier otro tipo no puede ser una fecha ISO 8601.
+    if not isinstance(value, str):
+        raise ValidationError("la fecha debe ser texto ISO 8601")
+    # Se reemplaza solo la Z final por +00:00 (que es lo que entiende fromisoformat).
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ValidationError("fecha con formato ISO 8601 inválido") from error
+    # Sin zona (fecha ingenua) o con un offset distinto de cero no es UTC.
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise ValidationError("la fecha debe ser UTC explícita (Z o +00:00)")
+    return parsed.astimezone(timezone.utc)
