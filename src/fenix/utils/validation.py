@@ -17,9 +17,17 @@ def identifier(value: str) -> str:
     Examples:
         identifier("grupo-01") devuelve "grupo-01"; "../ajeno" debe fallar.
     """
-    # TODO I1-A: usar isinstance y re.fullmatch con r"[a-z0-9-]{3,32}".
-    # No convertir automáticamente a minúsculas: podría cambiar la identidad.
-    raise NotImplementedError("I1-A: validar identifier")  # Quitar al completar.
+    # Primero el tipo: si no es texto, re.fullmatch lanzaría TypeError (no del dominio).
+    if not isinstance(value, str):
+        raise ValidationError("identifier debe ser texto")
+    # fullmatch exige que coincida TODO el texto.
+    # No se convierte a minúsculas: eso cambiaría la identidad recibida.
+    if re.fullmatch(r"[a-z0-9-]{3,32}", value) is None:
+        # El mensaje no copia el valor recibido, por si trae datos sensibles.
+        raise ValidationError(
+            "identifier debe tener 3 a 32 caracteres: minúsculas, dígitos o guion"
+        )
+    return value
 
 
 def ttl_seconds(value: str) -> int:
