@@ -1,4 +1,4 @@
-"""Contrato de eventos de autorreparación; integrante 1."""
+"""Contrato de eventos de autorreparación: integrante 1."""
 from fenix.utils.errors import ValidationError
 from fenix.utils.validation import identifier, utc_text
 
