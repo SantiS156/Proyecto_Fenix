@@ -22,7 +22,6 @@ def validate(event: dict, inventory: dict) -> dict:
         Copia validada del evento; no modifica inventory.
     Raises:
         ValidationError: Tipo, campo, timestamp o recurso no permitido.
-        NotImplementedError: Mientras no se complete TODO I1-D.
     Notes:
         event_type solo permite instance.stopped y bucket.tags_missing.
         simulate_failures solo es de laboratorio: entero de 0 a 5, excluyendo bool.
