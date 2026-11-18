@@ -1,6 +1,6 @@
 """Contratos de validación a completar por el integrante 1."""
 import re  # Comprueba el formato de los identificadores.
-from datetime import datetime, timezone  # Trabaja con fechas conscientes de UTC.
+from datetime import datetime, timedelta, timezone  # Trabaja con fechas conscientes de UTC.
 from fenix.utils.errors import ValidationError  # Error público del dominio.
 
 
@@ -17,9 +17,17 @@ def identifier(value: str) -> str:
     Examples:
         identifier("grupo-01") devuelve "grupo-01"; "../ajeno" debe fallar.
     """
-    # TODO I1-A: usar isinstance y re.fullmatch con r"[a-z0-9-]{3,32}".
-    # No convertir automáticamente a minúsculas: podría cambiar la identidad.
-    raise NotImplementedError("I1-A: validar identifier")  # Quitar al completar.
+    # Primero el tipo si no es texto, re.fullmatch lanzaría TypeError (no del dominio).
+    if not isinstance(value, str):
+        raise ValidationError("identifier debe ser texto")
+    # fullmatch exige que coincida TODO el texto.
+    # No se convierte a minúsculas: eso cambiaría la identidad recibida.
+    if re.fullmatch(r"[a-z0-9-]{3,32}", value) is None:
+        # El mensaje no copia el valor recibido, por si trae datos sensibles.
+        raise ValidationError(
+            "identifier debe tener 3 a 32 caracteres: minúsculas, dígitos o guion"
+        )
+    return value
 
 
 def ttl_seconds(value: str) -> int:
@@ -35,9 +43,17 @@ def ttl_seconds(value: str) -> int:
     Notes:
         La CLI traduce ValidationError a parser.error para salir con código 2.
     """
-    # TODO I1-B: convertir con int y capturar ValueError con encadenamiento.
-    # Comprobar 60 <= ttl <= 600; no aceptar decimales ni valores negativos.
-    raise NotImplementedError("I1-B: validar TTL")  # Sustituir por la validación.
+    # Solo texto int(60.9) truncaría a 60 sin avisar, y int(True) daría 1.
+    if not isinstance(value, str):
+        raise ValidationError("ttl debe ser texto con un entero")
+    try:
+        ttl = int(value)
+    except ValueError as error:
+        # "from error" conserva la causa original para diagnosticar.
+        raise ValidationError("ttl debe ser un entero") from error
+    if not 60 <= ttl <= 600:
+        raise ValidationError("ttl debe estar entre 60 y 600 segundos")
+    return ttl
 
 
 def utc_text(value: str) -> datetime:
@@ -51,6 +67,16 @@ def utc_text(value: str) -> datetime:
         ValidationError: Si falta zona, hay offset no nulo o formato inválido.
         NotImplementedError: Mientras no se complete TODO I1-C.
     """
-    # TODO I1-C: usar fromisoformat, reemplazando Z por +00:00.
-    # Rechazar tzinfo ausente y utcoffset distinto de timedelta(0).
-    raise NotImplementedError("I1-C: interpretar UTC")  # No usar hora local.
+    # Solo texto cualquier otro tipo no puede ser una fecha ISO 8601.
+    if not isinstance(value, str):
+        raise ValidationError("la fecha debe ser texto ISO 8601")
+    # Se reemplaza solo la Z final por +00:00 (que es lo que entiende fromisoformat).
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ValidationError("fecha con formato ISO 8601 inválido") from error
+    # Sin zona (fecha ingenua) o con un offset distinto de cero no es UTC.
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise ValidationError("la fecha debe ser UTC explícita (Z o +00:00)")
+    return parsed.astimezone(timezone.utc)
