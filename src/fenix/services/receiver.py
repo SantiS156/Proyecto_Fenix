@@ -1,43 +1,116 @@
+
 """Receptor FastAPI: autenticación, validación y aceptación durable por SQS."""
-import os  # Recupera el secreto sin incluirlo en el repositorio.
-import json  # Decodifica después de verificar los bytes.
-from fastapi import FastAPI, Request, HTTPException  # Interfaz HTTP del curso.
-from starlette.concurrency import run_in_threadpool  # Evita bloquear el event loop.
+import json
+import os
+
+from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from botocore.exceptions import BotoCoreError, ClientError
+
 from fenix.utils.crypto import verify
 from fenix.utils.errors import ValidationError
 from fenix.utils.state import load
 from fenix.services.events import validate
 from fenix.services.sqs import queue_url, publish
 
-app = FastAPI(title="Fénix receptor de alertas")  # Un servidor, un worker Uvicorn.
+
+app = FastAPI(title="Fénix receptor de alertas")
+
 
 @app.post("/webhook", status_code=202)
 async def webhook(request: Request) -> dict:
-    """Recibe un evento firmado y contesta 202 solo después de encolarlo.
+    """Autentica, valida y publica un evento en SQS."""
 
-    Args:
-        request: Petición con X-Webhook-Signature y cuerpo de hasta 16 KiB.
-    Returns:
-        JSON con status=accepted, event_id y message_id de SQS.
-    Raises:
-        HTTPException: 401 firma; 400 JSON; 413 tamaño; 422 contrato; 503 SQS.
-        NotImplementedError: Mientras no se complete TODO I3-B.
-    Side Effects:
-        Publica en SQS; no repara recursos ni llama a Telegram/Slack aquí.
-    Notes:
-        Leer bytes completos basta para el laboratorio; un proxy limitaría antes
-        el tamaño de la transferencia en un despliegue real.
-    """
-    raw = await request.body()  # Se conservan los bytes originales.
-    if len(raw) > 16384:  # Mantiene acotados los ejemplos didácticos.
-        raise HTTPException(413, "Cuerpo demasiado grande")  # No encola.
-    # TODO I3-B: verify(os.environ["WEBHOOK_SECRET"], cabecera, raw).
-    # Capturar ValidationError de la firma como HTTPException(401, mensaje genérico).
-    # Luego json.loads(raw); JSONDecodeError o UnicodeDecodeError -> 400.
-    # Validar contra load("data/inventory.json"); ValidationError de esquema -> 422.
-    # Usar await run_in_threadpool para load y llamadas Boto3 bloqueantes.
-    # Obtener queue_url(os.environ["QUEUE_PREFIX"]) y llamar publish.
-    # ClientError/BotoCoreError -> 503, sin prometer aceptación ni mostrar secretos.
-    # Retornar accepted/event_id/message_id únicamente después de send_message exitoso.
-    raise NotImplementedError("I3-B: completar receptor HTTP")
+    # 1. Leer el cuerpo original en bytes.
+    raw = await request.body()
+
+    # 2. Comprobar el tamaño máximo permitido: 16 KiB.
+    if len(raw) > 16384:
+        raise HTTPException(
+            status_code=413,
+            detail="Cuerpo demasiado grande"
+        )
+
+    # 3. Obtener la configuración del receptor.
+    secret = os.environ.get("WEBHOOK_SECRET")
+    prefix = os.environ.get("QUEUE_PREFIX")
+
+    if not secret or len(secret) < 16 or not prefix:
+        raise HTTPException(
+            status_code=503,
+            detail="Configuración del receptor incompleta"
+        )
+
+    # 4. Verificar la firma antes de interpretar el JSON.
+    header = request.headers.get("X-Webhook-Signature")
+
+    try:
+        verify(secret, header, raw)
+    except ValidationError:
+        raise HTTPException(
+            status_code=401,
+            detail="Autenticación inválida"
+        ) from None
+
+    # 5. Decodificar el JSON solamente después de autenticar.
+    try:
+        event = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=400,
+            detail="El cuerpo no contiene JSON válido"
+        ) from None
+
+    # 6. Cargar el inventario sin bloquear el event loop.
+    try:
+        inventory = await run_in_threadpool(
+            load,
+            "data/inventory.json"
+        )
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo consultar el inventario"
+        ) from None
+
+    # 7. Validar el contrato y el alias del recurso.
+    try:
+        validated_event = validate(event, inventory)
+    except ValidationError:
+        raise HTTPException(
+            status_code=422,
+            detail="Evento o recurso no autorizado"
+        ) from None
+
+    # 8. Obtener la URL de la cola y publicar el evento.
+    try:
+        url = await run_in_threadpool(queue_url, prefix)
+
+        message_id = await run_in_threadpool(
+            publish,
+            url,
+            validated_event
+        )
+
+        # No confirmar si SQS no devuelve un identificador válido.
+        if not isinstance(message_id, str) or not message_id:
+            raise HTTPException(
+                status_code=503,
+                detail="SQS no confirmó la publicación"
+            )
+
+    except HTTPException:
+        raise
+    except (ClientError, BotoCoreError, ValidationError):
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo publicar el evento en SQS"
+        ) from None
+
+    # 9. Confirmar solamente después de la publicación exitosa.
+    return {
+        "status": "accepted",
+        "event_id": validated_event["event_id"],
+        "message_id": message_id
+    }
+
