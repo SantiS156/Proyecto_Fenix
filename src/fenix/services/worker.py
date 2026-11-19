@@ -1,38 +1,121 @@
-"""Plantilla central de integración: un worker, un mensaje por vez."""
-import json  # Convierte Body solo dentro del control por mensaje.
-import time  # Evita un bucle intensivo si el emulador no responde.
+
+"""Worker central de integración: procesa mensajes de la cola."""
+
+import json
+import time
+
 from botocore.exceptions import BotoCoreError, ClientError
+
 from fenix.services.sqs import receive, acknowledge, retry_later
 from fenix.utils.errors import ProjectError
+from fenix.utils.state import load, save
 
 
 def run(url: str, handler, logger, once: bool = False) -> None:
-    """Consume mensajes y confirma únicamente resultados durables.
+    """Consume mensajes y confirma únicamente resultados durables."""
 
-    Args:
-        url: URL de la cola de trabajo, obtenida por get_queue_url.
-        handler: Callable handler(event) que revalida y ejecuta el caso de negocio.
-        logger: Logger JSON del proceso worker.
-        once: Si es True, realiza una sola consulta y termina; útil para pruebas.
-    Returns:
-        None al terminar la consulta única o al detenerse mediante Ctrl+C.
-    Raises:
-        NotImplementedError: Si todavía no se completaron las plantillas del alumno.
-    Side Effects:
-        Recibe mensajes, ejecuta el handler y cambia o confirma su recepción.
-    Notes:
-        Completar I5-A antes de usar. El parseo debe ocurrir por mensaje para que
-        un JSON corrupto no termine el worker ni oculte los otros mensajes.
-    """
-    # TODO I5-A: implementar el algoritmo de la sección 4 de la consigna.
-    # 1. Abrir un bucle; receive(url) queda en un try para fallos de transporte.
-    # 2. Para cada mensaje, definir el contexto message_id antes de json.loads.
-    # 3. Dentro del try por mensaje: decodificar JSON, exigir dict y llamar handler.
-    # 4. acknowledge solo si handler terminó y persistió todos sus pasos.
-    # 5. JSON/validación/negocio/red: registrar tipo seguro y llamar retry_later.
-    # 6. Un fallo del ACK también deja el evento disponible; handler es idempotente.
-    # 7. Nunca ACK en finally, ni borrar antes de notificar/persistir resultado.
-    # 8. Fallos del transporte o de retry_later: registrar y volver tras 2 segundos.
-    # 9. once termina tras una consulta; Ctrl+C sale y el main cierra el listener.
-    # 10. Los NotImplementedError deben propagarse: revelan que falta completar.
-    raise NotImplementedError("I5-A: implementar ciclo de vida del worker")
+    try:
+        while True:
+            try:
+                messages = receive(url)
+
+            except (BotoCoreError, ClientError) as error:
+                logger.error(
+                    "Error al recibir mensajes SQS",
+                    extra={"error_type": type(error).__name__},
+                )
+                time.sleep(2)
+
+            else:
+                for message in messages:
+                    message_id = message.get("MessageId", "unknown")
+
+                    try:
+                        event = json.loads(message["Body"])
+
+                        if not isinstance(event, dict):
+                            raise ValueError(
+                                "El evento debe ser un diccionario"
+                            )
+
+                        receipt_handle = message["ReceiptHandle"]
+                        handler(event)
+
+                    except NotImplementedError:
+                        raise
+
+                    except (
+                        json.JSONDecodeError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                        ProjectError,
+                        BotoCoreError,
+                        ClientError,
+                    ) as error:
+                        logger.error(
+                            "Error al procesar el mensaje",
+                            extra={
+                                "message_id": message_id,
+                                "error_type": type(error).__name__,
+                            },
+                        )
+
+                        try:
+                            retry_later(url, message)
+                        except (BotoCoreError, ClientError) as retry_error:
+                            logger.error(
+                                "Error al reprogramar el mensaje",
+                                extra={
+                                    "message_id": message_id,
+                                    "error_type": type(retry_error).__name__,
+                                },
+                            )
+                            time.sleep(2)
+
+                    else:
+                        try:
+                            acknowledge(url, receipt_handle)
+
+                        except (BotoCoreError, ClientError) as ack_error:
+                            logger.error(
+                                "Error al confirmar el mensaje",
+                                extra={
+                                    "message_id": message_id,
+                                    "error_type": type(ack_error).__name__,
+                                },
+                            )
+                            time.sleep(2)
+
+                        else:
+                            try:
+                                event_id = event["event_id"]
+                                ledger = load("data/events.json")
+
+                                if not isinstance(ledger, dict):
+                                    raise ValueError(
+                                        "El registro de eventos no es válido"
+                                    )
+
+                                record = ledger.get(event_id)
+
+                                if not isinstance(record, dict):
+                                    raise ValueError(
+                                        "No existe un registro válido "
+                                        "para el evento confirmado"
+                                    )
+
+                                record["status"] = "acknowledged"
+                                save("data/events.json", ledger)
+
+                            except (KeyError, OSError, ValueError, TypeError):
+                                logger.error(
+                                    "No se pudo registrar el ACK en el ledger",
+                                    extra={"message_id": message_id},
+                                )
+
+            if once:
+                break
+
+    except KeyboardInterrupt:
+        logger.info("Worker detenido por el usuario")
