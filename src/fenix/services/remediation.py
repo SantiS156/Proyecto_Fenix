@@ -297,11 +297,131 @@ def repair(resource: dict, event_type: str) -> str:
     raise PermanentError("Tipo de recurso no permitido")
 
 
+
+
 def handle(event: dict) -> None:
-    """Reservado al Integrante 5: orquestación durable del evento."""
+    """Completa la reparación y notificación usando un registro durable."""
 
-    # No implementar aquí: corresponde al TODO I5-B.
-    raise NotImplementedError(
-        "I5-B: integrar reparación, notificación y ledger durable"
-    )
+    # Cargar el inventario y validar el evento.
+    inventory = load("data/inventory.json")
+    validated = validate(event, inventory)
 
+    event_id = validated["event_id"]
+    resource_id = validated["resource_id"]
+
+    # Resolver el recurso autorizado.
+    resource = inventory.get(resource_id)
+
+    if resource is None:
+        raise ValidationError("Recurso no encontrado en el inventario")
+
+    # Cargar el registro durable.
+    ledger = load("data/events.json")
+
+    if not isinstance(ledger, dict):
+        raise PermanentError("El registro de eventos no es válido")
+
+    # Buscar el evento por su ID.
+    record = ledger.get(event_id)
+
+    if record is None:
+        record = {
+            "event": validated,
+            "attempts": 0,
+            "repair_done": False,
+            "repair_result": None,
+            "notified": False,
+            "status": "pending"
+        }
+        ledger[event_id] = record
+
+    else:
+        # Evitar que un mismo ID represente eventos diferentes.
+        if not isinstance(record, dict):
+            raise PermanentError("Registro de evento inválido")
+
+        if record.get("event") != validated:
+            raise PermanentError(
+                "El event_id ya fue utilizado con otro contenido"
+            )
+
+        # Comprobar la integridad del registro.
+        attempts = record.get("attempts")
+        repair_done = record.get("repair_done")
+        notified = record.get("notified")
+        repair_result = record.get("repair_result")
+
+        if (
+            isinstance(attempts, bool)
+            or not isinstance(attempts, int)
+            or attempts < 0
+            or not isinstance(repair_done, bool)
+            or not isinstance(notified, bool)
+            or not isinstance(record.get("status"), str)
+        ):
+            raise PermanentError("El registro de evento está dañado")
+
+        if notified and not repair_done:
+            raise PermanentError(
+                "El evento figura notificado sin estar reparado"
+            )
+
+        if repair_done and repair_result not in (
+            "repaired",
+            "already_ok"
+        ):
+            raise PermanentError("Resultado de reparación inválido")
+
+        if not repair_done and repair_result is not None:
+            raise PermanentError(
+                "Resultado de reparación inconsistente"
+            )
+
+    # Si ya terminó, no repetir el procesamiento.
+    if record["repair_done"] and record["notified"]:
+        return
+
+    # Registrar el intento antes de continuar.
+    record["attempts"] += 1
+    record["status"] = "processing"
+    save("data/events.json", ledger)
+
+    # Aplicar fallas temporales simuladas.
+    if record["attempts"] <= validated["simulate_failures"]:
+        record["status"] = "retry_pending"
+        save("data/events.json", ledger)
+        raise RetryableError("Falla temporal simulada")
+
+    # Reparar únicamente si todavía no se reparó.
+    if not record["repair_done"]:
+        result = repair(resource, validated["event_type"])
+
+        record["repair_result"] = result
+        record["repair_done"] = True
+        record["status"] = "notification_pending"
+
+        # Guardar la reparación antes de intentar notificar.
+        save("data/events.json", ledger)
+
+    # Notificar únicamente si todavía está pendiente.
+    if not record["notified"]:
+        message = (
+            f"Evento: {event_id}\n"
+            f"Tipo: {validated['event_type']}\n"
+            f"Recurso: {resource_id}\n"
+            f"Resultado: {record['repair_result']}"
+        )
+
+        try:
+            notify(message)
+
+        except RetryableError:
+            # La reparación ya quedó guardada.
+            # En el próximo intento solo se repetirá la notificación.
+            record["status"] = "notification_pending"
+            save("data/events.json", ledger)
+            raise
+
+        record["notified"] = True
+        record["status"] = "completed"
+        save("data/events.json", ledger)
