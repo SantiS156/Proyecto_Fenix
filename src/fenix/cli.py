@@ -59,7 +59,17 @@ def main() -> int:
             response.raise_for_status()  # No mostrar éxito ante 4xx o 5xx.
             print(response.status_code, response.text)  # Respuesta pública del receptor.
         elif args.command == "worker":  # Consume un mensaje por consulta.
-            worker.run(sqs.queue_url(prefix), remediation.handle, logger, args.once)
+    
+            def handle_with_logging(event):
+                return remediation.handle(event, logger)
+
+            worker.run(
+                sqs.queue_url(prefix),
+                handle_with_logging,
+                logger,
+                args.once
+            )
+
     except KeyboardInterrupt:  # Detención manual esperada.
         logger.info("detenido_por_operador")  # No se captura BaseException.
     except (ProjectError, BotoCoreError, ClientError, OSError, ValueError, KeyError,

@@ -299,7 +299,7 @@ def repair(resource: dict, event_type: str) -> str:
 
 
 
-def handle(event: dict) -> None:
+def handle(event: dict, logger=None) -> None:
     """Completa la reparación y notificación usando un registro durable."""
 
     # Cargar el inventario y validar el evento.
@@ -308,6 +308,16 @@ def handle(event: dict) -> None:
 
     event_id = validated["event_id"]
     resource_id = validated["resource_id"]
+    if logger:
+        logger.info(
+            "Procesamiento de evento iniciado",
+            extra={
+                "event_id": event_id,
+                "resource_id": resource_id,
+                "action": "process",
+                "status": "started"
+            }
+        )
 
     # Resolver el recurso autorizado.
     resource = inventory.get(resource_id)
@@ -403,6 +413,18 @@ def handle(event: dict) -> None:
         # Guardar la reparación antes de intentar notificar.
         save("data/events.json", ledger)
 
+        if logger:
+            logger.info(
+                "Reparación completada",
+                extra={
+                    "event_id": event_id,
+                    "resource_id": resource_id,
+                    "attempt": record["attempts"],
+                    "action": "repair",
+                    "status": "success"
+                }
+            )
+
     # Notificar únicamente si todavía está pendiente.
     if not record["notified"]:
         message = (
@@ -414,6 +436,18 @@ def handle(event: dict) -> None:
 
         try:
             notify(message)
+
+            if logger:
+                logger.info(
+                    "Notificación enviada correctamente",
+                    extra={
+                        "event_id": event_id,
+                        "resource_id": resource_id,
+                        "attempt": record["attempts"],
+                        "action": "notification",
+                        "status": "success"
+                    }
+                )
 
         except RetryableError:
             # La reparación ya quedó guardada.
