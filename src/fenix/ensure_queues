@@ -1,0 +1,95 @@
+import json
+import os
+from pathlib import Path
+from botocore.exceptions import ClientError
+
+INVENTORY_PATH = Path(os.getenv("FENIX_INVENTORY_FILE", "inventory.json"))
+GROUP_TAG_KEY = os.getenv("FENIX_GROUP_TAG_KEY", "ProyectoFenixGroup")
+GROUP_TAG_VALUE = os.getenv("FENIX_GROUP_TAG_VALUE", "grupo-01")
+
+
+def _load_inventory() -> dict:
+    if INVENTORY_PATH.exists():
+        return json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
+    return {
+        "group": GROUP_TAG_VALUE,
+        "queues": {},
+        "resources": {},
+    }
+
+
+def _save_inventory(inventory: dict) -> None:
+    INVENTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = INVENTORY_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(inventory, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(INVENTORY_PATH)
+
+
+def ensure_queues(sqs_client, base_name: str, max_receive_count: int = 3) -> dict:
+    """Crea o reutiliza una DLQ y una cola estándar con RedrivePolicy,
+    conservando la QueueUrl devuelta por el SDK y guardando el inventario tras cada paso.
+    """
+    inventory = _load_inventory()
+    queues = inventory.setdefault("queues", {})
+
+    dlq_name = f"{base_name}-dlq"
+    main_name = f"{base_name}-queue"
+    tags = {GROUP_TAG_KEY: GROUP_TAG_VALUE, "Role": "I2-Messaging"}
+
+    # 1. Buscar o crear la DLQ
+    try:
+        dlq_url = sqs_client.get_queue_url(QueueName=dlq_name)["QueueUrl"]
+    except ClientError as err:
+        code = err.response.get("Error", {}).get("Code", "")
+        if code not in ("AWS.SimpleQueueService.NonExistentQueue", "QueueDoesNotExist"):
+            raise
+        dlq_url = sqs_client.create_queue(QueueName=dlq_name, tags=tags)["QueueUrl"]
+
+    dlq_arn = sqs_client.get_queue_attributes(
+        QueueUrl=dlq_url,
+        AttributeNames=["QueueArn"],
+    )["Attributes"]["QueueArn"]
+
+    queues["dlq"] = {
+        "name": dlq_name,
+        "url": dlq_url,
+        "arn": dlq_arn,
+    }
+    _save_inventory(inventory)
+
+    # 2. Buscar o crear la cola estándar vinculada a la DLQ vía RedrivePolicy
+    redrive_policy = json.dumps({
+        "deadLetterTargetArn": dlq_arn,
+        "maxReceiveCount": max_receive_count,
+    })
+
+    try:
+        main_url = sqs_client.get_queue_url(QueueName=main_name)["QueueUrl"]
+        sqs_client.set_queue_attributes(
+            QueueUrl=main_url,
+            Attributes={"RedrivePolicy": redrive_policy},
+        )
+    except ClientError as err:
+        code = err.response.get("Error", {}).get("Code", "")
+        if code not in ("AWS.SimpleQueueService.NonExistentQueue", "QueueDoesNotExist"):
+            raise
+        main_url = sqs_client.create_queue(
+            QueueName=main_name,
+            Attributes={"RedrivePolicy": redrive_policy},
+            tags=tags,
+        )["QueueUrl"]
+
+    main_arn = sqs_client.get_queue_attributes(
+        QueueUrl=main_url,
+        AttributeNames=["QueueArn"],
+    )["Attributes"]["QueueArn"]
+
+    queues["main"] = {
+        "name": main_name,
+        "url": main_url,
+        "arn": main_arn,
+        "maxReceiveCount": max_receive_count,
+    }
+    _save_inventory(inventory)
+
+    return queues
