@@ -17,9 +17,9 @@ def validate(event: dict, inventory: dict) -> dict:
     Args:
         event: JSON objeto con schema_version, event_id, event_type, resource_id,
             occurred_at y simulate_failures.
-        inventory: Mapa alias -> recurso, preparado por setup-demo y revisado por el grupo.
+        inventory: Mapa alias recurso, preparado por setup demo y revisado por el grupo.
     Returns:
-        Copia validada del evento; no modifica inventory.
+        Copia validada del evento no modifica inventory.
     Raises:
         ValidationError: Tipo, campo, timestamp o recurso no permitido.
     Notes:
