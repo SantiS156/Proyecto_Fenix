@@ -12,6 +12,8 @@ from fenix.utils.logging_json import setup
 from fenix.utils.crypto import signature
 from fenix.utils.errors import ProjectError
 from fenix.services import sqs, demo, worker, remediation
+from fenix.config.settings import get_aws_clients
+from fenix.services.messaging import ensure_queues
 
 
 def main() -> int:
@@ -43,7 +45,9 @@ def main() -> int:
     try:  # Una frontera de entrada controla errores de las dependencias.
         prefix = os.environ["QUEUE_PREFIX"]  # Exige un prefijo explícito.
         if args.command == "init-queues":  # Crea primero la DLQ.
-            print(sqs.ensure_queues(prefix))  # Las URLs provienen del SDK.
+            sqs_client = get_aws_clients()["sqs"]
+            queues = ensure_queues(sqs_client, base_name=prefix, max_receive_count=3)
+            print(json.dumps(queues, indent=2))
         elif args.command == "setup-demo":  # Crea o recupera recursos.
             print(demo.setup_demo(os.environ["GROUP_ID"]))  # Sin secretos.
         elif args.command == "fault":  # Perturba solo el inventario del grupo.
@@ -53,13 +57,19 @@ def main() -> int:
             json.loads(body)  # Rechaza archivos no JSON antes de enviar.
             timestamp = int(time.time())  # La firma autentica también este número.
             digest = signature(os.environ["WEBHOOK_SECRET"], timestamp, body)
-            response = requests.post("http://127.0.0.1:8000/webhook", data=body,
-                headers={"Content-Type": "application/json",
-                         "X-Webhook-Signature": f"t={timestamp},v1={digest}"}, timeout=(2, 15))
+            response = requests.post(
+                "http://127.0.0.1:8000/webhook",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Signature": f"t={timestamp},v1={digest}",
+                },
+                timeout=(2, 15),
+            )
             response.raise_for_status()  # No mostrar éxito ante 4xx o 5xx.
             print(response.status_code, response.text)  # Respuesta pública del receptor.
         elif args.command == "worker":  # Consume un mensaje por consulta.
-    
+
             def handle_with_logging(event):
                 return remediation.handle(event, logger)
 
@@ -67,7 +77,7 @@ def main() -> int:
                 sqs.queue_url(prefix),
                 handle_with_logging,
                 logger,
-                args.once
+                args.once,
             )
 
     except KeyboardInterrupt:  # Detención manual esperada.
@@ -80,6 +90,7 @@ def main() -> int:
     finally:  # Se libera el pipeline tanto en éxito como en error.
         listener.stop()  # No return, break ni continue dentro de finally.
     return code  # El código de salida refleja el resultado de la ejecución.
+
 
 if __name__ == "__main__":  # Permite python -m fenix.cli.
     sys.exit(main())  # Hace visible el resultado a la terminal.
