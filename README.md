@@ -18,7 +18,7 @@ Además, incorpora registro de eventos, manejo de errores, reintentos, notificac
 
 | Rol | Apellido y nombre | Correo | Módulos | Pruebas defendidas |
 |---|---|---|---|---|
-| Integrante 1 | Lamas, Joel | Pendiente | Pendiente | Pendiente |
+| Integrante 1 | Lamas, Joel | joelcaiok@gmail.com | `utils/errors.py`, `utils/validation.py`, `services/events.py` | `test_i1.py` |
 | Integrante 2 | Cruz Vargas, Alex | Pendiente | Pendiente | Pendiente |
 | Integrante 3 | Mendez, Mateo Joaquin | Pendiente | Pendiente | Pendiente |
 | Integrante 4 | Sosa, Santiago Ezequiel | santiagohsosa2019@gmail.com | `logging_json.py`, `notifications.py` | `test_i4.py` |
