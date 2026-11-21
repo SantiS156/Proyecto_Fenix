@@ -1,6 +1,7 @@
 """Pruebas del integrante 1 identifier, ttl_seconds, utc_text y events.validate."""
 import copy
-
+import json
+from pathlib import Path
 import pytest
 
 from fenix.services.events import validate
@@ -89,3 +90,25 @@ def test_validate_evento_correcto_devuelve_copia():
 def test_validate_rechaza(evento):
     with pytest.raises(ValidationError):
         validate(evento, INVENTARIO)
+
+
+EJEMPLOS = Path(__file__).resolve().parent.parent / "examples"
+
+
+def cargar(nombre):
+    return json.loads((EJEMPLOS / nombre).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("nombre", ["node-event.json", "bucket-event.json"])
+def test_ejemplos_validos_se_aceptan(nombre):
+    evento = cargar(nombre)
+    assert validate(evento, INVENTARIO) == evento
+
+
+@pytest.mark.parametrize(
+    "nombre",
+    ["invalid-list.json", "invalid-extra-key.json", "invalid-foreign-resource.json"],
+)
+def test_ejemplos_invalidos_se_rechazan(nombre):
+    with pytest.raises(ValidationError):
+        validate(cargar(nombre), INVENTARIO)
