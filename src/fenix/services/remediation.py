@@ -320,7 +320,7 @@ def handle(event: dict, logger=None) -> None:
         )
 
     # Resolver el recurso autorizado.
-    resource = inventory.get(resource_id)
+    resource = inventory.get("resources", {}).get(resource_id)
 
     if resource is None:
         raise ValidationError("Recurso no encontrado en el inventario")

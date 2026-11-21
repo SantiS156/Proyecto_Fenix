@@ -26,11 +26,14 @@ def test_duplicate_is_idempotent(tmp_path, monkeypatch):
 
     # Crear un inventario válido para el evento.
     inventory = {
+    "group": "grupo01",
+    "resources": {
         "demo-ec2": {
             "type": "ec2",
             "id": "i-1234567890abcdef0"
         }
     }
+}
     save_test("data/inventory.json", inventory)
 
     # Reemplazar las rutas de almacenamiento del handler.
