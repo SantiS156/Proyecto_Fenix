@@ -1,116 +1,156 @@
 
-"""Receptor FastAPI: autenticación, validación y aceptación durable por SQS."""
+"""Receptor HTTP de webhooks del proyecto Fénix."""
+
 import json
 import os
 
 from fastapi import FastAPI, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
 from botocore.exceptions import BotoCoreError, ClientError
+from starlette.concurrency import run_in_threadpool
 
 from fenix.utils.crypto import verify
 from fenix.utils.errors import ValidationError
+from fenix.utils.events import validate
 from fenix.utils.state import load
-from fenix.services.events import validate
 from fenix.services.sqs import queue_url, publish
 
 
-app = FastAPI(title="Fénix receptor de alertas")
+app = FastAPI(title="Fénix Webhook Receiver")
+
+MAX_BODY_SIZE = 16 * 1024
+INVENTORY_PATH = "data/inventory.json"
+
+
+def reject_duplicate_keys(pairs):
+    """Rechaza claves JSON duplicadas."""
+    result = {}
+
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("El JSON contiene claves duplicadas")
+
+        result[key] = value
+
+    return result
+
+
+async def read_limited_body(request: Request) -> bytes:
+    """Lee el cuerpo HTTP sin aceptar más de 16 KiB."""
+    body = bytearray()
+
+    async for chunk in request.stream():
+        body.extend(chunk)
+
+        if len(body) > MAX_BODY_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail="El cuerpo supera el tamaño permitido",
+            )
+
+    return bytes(body)
 
 
 @app.post("/webhook", status_code=202)
-async def webhook(request: Request) -> dict:
+async def receive_webhook(request: Request):
     """Autentica, valida y publica un evento en SQS."""
 
-    # 1. Leer el cuerpo original en bytes.
-    raw = await request.body()
-
-    # 2. Comprobar el tamaño máximo permitido: 16 KiB.
-    if len(raw) > 16384:
-        raise HTTPException(
-            status_code=413,
-            detail="Cuerpo demasiado grande"
-        )
-
-    # 3. Obtener la configuración del receptor.
+    body = await read_limited_body(request)
+ 
     secret = os.environ.get("WEBHOOK_SECRET")
-    prefix = os.environ.get("QUEUE_PREFIX")
 
-    if not secret or len(secret) < 16 or not prefix:
+    if not isinstance(secret, str) or len(secret) < 16:
         raise HTTPException(
-            status_code=503,
-            detail="Configuración del receptor incompleta"
+            status_code=500,
+            detail="Configuración de autenticación inválida",
         )
 
-    # 4. Verificar la firma antes de interpretar el JSON.
-    header = request.headers.get("X-Webhook-Signature")
+    signature_header = request.headers.get("X-Webhook-Signature")
+
+    if not signature_header:
+        raise HTTPException(
+            status_code=401,
+            detail="Falta la firma del webhook",
+        )
 
     try:
-        verify(secret, header, raw)
+        verify(secret, signature_header, body)
+
     except ValidationError:
         raise HTTPException(
             status_code=401,
-            detail="Autenticación inválida"
+            detail="Autenticación del webhook inválida",
         ) from None
 
-    # 5. Decodificar el JSON solamente después de autenticar.
     try:
-        event = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        event = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise HTTPException(
             status_code=400,
-            detail="El cuerpo no contiene JSON válido"
+            detail="El cuerpo no contiene un JSON válido",
         ) from None
 
-    # 6. Cargar el inventario sin bloquear el event loop.
     try:
-        inventory = await run_in_threadpool(
-            load,
-            "data/inventory.json"
-        )
+        inventory = load(INVENTORY_PATH)
+
     except (OSError, json.JSONDecodeError):
         raise HTTPException(
             status_code=503,
-            detail="No se pudo consultar el inventario"
+            detail="No se pudo consultar el inventario",
         ) from None
 
-    # 7. Validar el contrato y el alias del recurso.
+    if not isinstance(inventory, dict):
+        raise HTTPException(
+            status_code=503,
+            detail="El inventario no tiene un formato válido",
+        )
+
+    resources = inventory.get("resources")
+
+    if not isinstance(resources, dict):
+        raise HTTPException(
+            status_code=503,
+            detail="El inventario de recursos no está disponible",
+        )
+
     try:
-        validated_event = validate(event, inventory)
-    except ValidationError:
+        validated_event = validate(event, resources)
+
+    except ValidationError as error:
         raise HTTPException(
             status_code=422,
-            detail="Evento o recurso no autorizado"
+            detail=str(error),
         ) from None
 
-    # 8. Obtener la URL de la cola y publicar el evento.
+    prefix = os.environ.get("QUEUE_PREFIX")
+
+    if not prefix:
+        raise HTTPException(
+            status_code=503,
+            detail="No está configurado el prefijo de las colas",
+        )
+
     try:
         url = await run_in_threadpool(queue_url, prefix)
 
         message_id = await run_in_threadpool(
             publish,
             url,
-            validated_event
+            validated_event,
         )
 
-        # No confirmar si SQS no devuelve un identificador válido.
-        if not isinstance(message_id, str) or not message_id:
-            raise HTTPException(
-                status_code=503,
-                detail="SQS no confirmó la publicación"
-            )
-
-    except HTTPException:
-        raise
-    except (ClientError, BotoCoreError, ValidationError):
+    except (BotoCoreError, ClientError, OSError, KeyError):
         raise HTTPException(
             status_code=503,
-            detail="No se pudo publicar el evento en SQS"
+            detail="No se pudo publicar el evento en SQS",
         ) from None
 
-    # 9. Confirmar solamente después de la publicación exitosa.
     return {
         "status": "accepted",
         "event_id": validated_event["event_id"],
-        "message_id": message_id
+        "message_id": message_id,
     }
 

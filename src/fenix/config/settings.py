@@ -43,3 +43,11 @@ def client(service: str):
                       retries={"mode": "standard", "total_max_attempts": 2},
                       s3={"addressing_style": "path"}),
     )  # Los reintentos SDK son distintos de las recepciones SQS.
+
+def get_aws_clients() -> dict:
+    """Devuelve los clientes sqs, ec2 y s3 usando la función client() de este módulo."""
+    return {
+        "sqs": client("sqs"),
+        "ec2": client("ec2"),
+        "s3": client("s3"),
+    }

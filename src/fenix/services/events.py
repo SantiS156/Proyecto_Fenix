@@ -47,7 +47,8 @@ def validate(event: dict, inventory: dict) -> dict:
     if not isinstance(event_type, str) or event_type not in EVENT_RESOURCE_TYPE:
         raise ValidationError("event_type no está permitido")
     # 6 Solo aliases del inventario nunca ARN ni InstanceId elegidos por el remitente.
-    resource = inventory.get(resource_id)
+    resources = inventory.get("resources", {})
+    resource = resources.get(resource_id)
     if not isinstance(resource, dict):
         raise ValidationError("resource_id no pertenece al inventario autorizado")
     # 7 El tipo de evento debe corresponder al tipo del recurso.
