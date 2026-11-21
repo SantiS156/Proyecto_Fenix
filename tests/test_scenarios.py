@@ -127,7 +127,7 @@ def test_ack_is_after_success(monkeypatch):
     monkeypatch.setattr(worker, "save", lambda path, data: None)
 
     # Caso 1: el handler falla. Debe reintentar y nunca confirmar.
-    def failing_handler(event):
+    def failing_handler(event, message_id=None):
         calls.append("handler")
         raise RetryableError("Fallo temporal de prueba")
 
@@ -139,7 +139,7 @@ def test_ack_is_after_success(monkeypatch):
     # Caso 2: el handler termina correctamente.
     calls.clear()
 
-    def successful_handler(event):
+    def successful_handler(event, message_id=None):
         calls.append("handler")
 
     worker.run("fake-queue-url", successful_handler, logger, once=True)

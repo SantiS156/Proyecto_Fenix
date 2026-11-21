@@ -39,7 +39,7 @@ def run(url: str, handler, logger, once: bool = False) -> None:
                             )
 
                         receipt_handle = message["ReceiptHandle"]
-                        handler(event)
+                        handler(event, message_id=message_id)
 
                     except NotImplementedError:
                         raise

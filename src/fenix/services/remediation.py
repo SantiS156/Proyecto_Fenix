@@ -299,7 +299,7 @@ def repair(resource: dict, event_type: str) -> str:
 
 
 
-def handle(event: dict, logger=None) -> None:
+def handle(event: dict, logger=None, message_id=None) -> None:
     """Completa la reparación y notificación usando un registro durable."""
 
     # Cargar el inventario y validar el evento.
@@ -312,6 +312,7 @@ def handle(event: dict, logger=None) -> None:
         logger.info(
             "Procesamiento de evento iniciado",
             extra={
+                "message_id": message_id,
                 "event_id": event_id,
                 "resource_id": resource_id,
                 "action": "process",
@@ -417,6 +418,7 @@ def handle(event: dict, logger=None) -> None:
             logger.info(
                 "Reparación completada",
                 extra={
+                    "message_id": message_id,
                     "event_id": event_id,
                     "resource_id": resource_id,
                     "attempt": record["attempts"],
@@ -441,6 +443,7 @@ def handle(event: dict, logger=None) -> None:
                 logger.info(
                     "Notificación enviada correctamente",
                     extra={
+                        "message_id": message_id,
                         "event_id": event_id,
                         "resource_id": resource_id,
                         "attempt": record["attempts"],

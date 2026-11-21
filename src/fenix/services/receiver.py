@@ -3,17 +3,18 @@
 
 import json
 import os
-
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from botocore.exceptions import BotoCoreError, ClientError
 from starlette.concurrency import run_in_threadpool
 
 from fenix.utils.crypto import verify
 from fenix.utils.errors import ValidationError
-from fenix.utils.events import validate
+from fenix.services.events import validate
 from fenix.utils.state import load
 from fenix.services.sqs import queue_url, publish
 
+load_dotenv()
 
 app = FastAPI(title="Fénix Webhook Receiver")
 
@@ -117,7 +118,7 @@ async def receive_webhook(request: Request):
         )
 
     try:
-        validated_event = validate(event, resources)
+        validated_event = validate(event, inventory)
 
     except ValidationError as error:
         raise HTTPException(

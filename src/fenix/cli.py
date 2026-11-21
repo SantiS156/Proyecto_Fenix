@@ -73,8 +73,8 @@ def main() -> int:
             print(response.status_code, response.text)  # Respuesta pública del receptor.
         elif args.command == "worker":  # Consume un mensaje por consulta.
 
-            def handle_with_logging(event):
-                return remediation.handle(event, logger)
+            def handle_with_logging(event, message_id=None):
+                return remediation.handle(event, logger, message_id=message_id)
 
             worker.run(
                 sqs.queue_url(prefix),
