@@ -5,6 +5,12 @@ import fenix.utils.state as state
 import pytest  # Mantiene visibles los casos sin implementar.
 import fenix.services.worker as worker
 from fenix.utils.errors import RetryableError
+import logging
+import time
+import uuid
+
+from fenix.config.settings import client
+from fenix.services.sqs import ensure_queues
 
 def test_duplicate_is_idempotent(tmp_path, monkeypatch):
     """Comprueba que repetir un evento no repite reparación ni notificación."""
@@ -138,21 +144,79 @@ def test_ack_is_after_success(monkeypatch):
     assert calls == ["handler", "ack"]
 
 
+
 @pytest.mark.integracion
 def test_redrive_with_localstack():
-    """Comprueba DLQ efectiva usando el broker, no una lista simulada en Python.
+    """Comprueba que un mensaje venenoso termina en la DLQ real."""
 
-    Returns:
-        None si un mensaje venenoso termina en la DLQ y el worker sigue vivo.
-    Raises:
-        NotImplementedError: Hasta implementar el ensayo con espera total acotada.
-    Side Effects:
-        Crea colas de prueba exclusivas y las limpia después de guardar evidencia.
-    Notes:
-        Usar un prefijo de test nuevo y no purgar colas del laboratorio del grupo.
-    """
-    # TODO I6-D: publicar JSON corrupto en una cola con RedrivePolicy real.
-    # Consumir con el worker y consultar DLQ con deadline total de 120 segundos.
-    # Comparar el Body original; un contador aproximado por sí solo no demuestra redrive.
-    # Si se agota el deadline, fallar con diagnóstico; no pasar el test por timeout.
-    raise NotImplementedError("I6-D: verificar redrive real en LocalStack")
+    # Prefijo exclusivo para no tocar las colas del grupo.
+    prefix = f"efimero-i6d-{uuid.uuid4().hex[:10]}"
+
+    sqs = client("sqs")
+    work_url = None
+    dlq_url = None
+
+    # El cuerpo es intencionalmente inválido como JSON.
+    original_body = '{"evento": JSON_CORRUPTO'
+
+    logger = logging.getLogger("i6d-redrive-test")
+    logger.addHandler(logging.NullHandler())
+    logger.setLevel(logging.ERROR)
+
+    try:
+        # Crear las colas y su política Redrive real.
+        work_url, dlq_url = ensure_queues(prefix)
+
+        # Publicar directamente en la cola principal.
+        sqs.send_message(
+            QueueUrl=work_url,
+            MessageBody=original_body,
+        )
+
+        deadline = time.monotonic() + 120
+        received_body = None
+
+        # Ejecutar ciclos reales del worker hasta encontrar el mensaje en DLQ.
+        while time.monotonic() < deadline:
+            worker.run(
+                work_url,
+                lambda event: None,
+                logger,
+                once=True,
+            )
+
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                break
+
+            # Consultar la DLQ con una espera corta.
+            response = sqs.receive_message(
+                QueueUrl=dlq_url,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=1,
+            )
+
+            messages = response.get("Messages", [])
+
+            if messages:
+                received_body = messages[0]["Body"]
+                break
+
+        # No se acepta como éxito que simplemente se agote el tiempo.
+        assert received_body is not None, (
+            "El mensaje no llegó a la DLQ dentro de 120 segundos. "
+            "Revisar los reintentos y la política Redrive."
+        )
+
+        # Confirmar que SQS trasladó exactamente el mensaje original.
+        assert received_body == original_body
+
+    finally:
+        # Eliminar únicamente las colas exclusivas de esta prueba.
+        if work_url is not None:
+            sqs.delete_queue(QueueUrl=work_url)
+
+        if dlq_url is not None:
+            sqs.delete_queue(QueueUrl=dlq_url)
+

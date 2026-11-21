@@ -12,8 +12,8 @@ from fenix.utils.logging_json import setup
 from fenix.utils.crypto import signature
 from fenix.utils.errors import ProjectError
 from fenix.services import sqs, demo, worker, remediation
-from fenix.config.settings import get_aws_clients
-from fenix.services.messaging import ensure_queues
+
+
 
 
 def main() -> int:
@@ -44,10 +44,13 @@ def main() -> int:
     code = 0  # El resultado se devuelve fuera de finally.
     try:  # Una frontera de entrada controla errores de las dependencias.
         prefix = os.environ["QUEUE_PREFIX"]  # Exige un prefijo explícito.
-        if args.command == "init-queues":  # Crea primero la DLQ.
-            sqs_client = get_aws_clients()["sqs"]
-            queues = ensure_queues(sqs_client, base_name=prefix, max_receive_count=3)
-            print(json.dumps(queues, indent=2))
+        if args.command == "init-queues":
+            work_url, dlq_url = sqs.ensure_queues(prefix)
+
+            print(json.dumps({
+                "work_url": work_url,
+                "dlq_url": dlq_url,
+            }, indent=2))
         elif args.command == "setup-demo":  # Crea o recupera recursos.
             print(demo.setup_demo(os.environ["GROUP_ID"]))  # Sin secretos.
         elif args.command == "fault":  # Perturba solo el inventario del grupo.
