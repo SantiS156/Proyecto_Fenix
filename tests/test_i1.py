@@ -8,8 +8,11 @@ from fenix.utils.errors import ValidationError
 from fenix.utils.validation import identifier, ttl_seconds, utc_text
 
 INVENTARIO = {
-    "node-01": {"type": "ec2", "id": "i-0001"},
-    "bucket-01": {"type": "s3", "id": "bucket-prueba"},
+    "group": "grupo01",
+    "resources": {
+        "node-01": {"type": "ec2", "id": "i-0001"},
+        "bucket-01": {"type": "s3", "id": "bucket-prueba"},
+    },
 }
 EVENTO_NODO = {
     "schema_version": 1,

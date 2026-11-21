@@ -4,7 +4,8 @@ from fenix.config.settings import client
 from fenix.utils.errors import PermanentError
 from fenix.utils.state import load, save
 from fenix.utils.validation import identifier
-
+import time
+from fenix.utils.errors import ValidationError
 
 def _tags_to_dict(tags: list[dict[str, str]] | None) -> dict[str, str]:
     return {t["Key"]: t["Value"] for t in (tags or [])}
@@ -33,10 +34,7 @@ def setup_demo(group: str) -> dict:
     ec2 = client("ec2")
     s3 = client("s3")
 
-    try:
-        state = load()
-    except Exception:
-        state = {}
+    state = load("data/inventory.json")
 
     vpcs = ec2.describe_vpcs(Filters=[{"Name": "is-default", "Values": ["true"]}])["Vpcs"]
     if not vpcs:
@@ -173,11 +171,10 @@ def setup_demo(group: str) -> dict:
         raise PermanentError("No se pudo verificar la propiedad del bucket de laboratorio")
 
     inventory = {
-        "group": group_id,
-        "vpc_id": vpc_id,
-        "image_id": image_id,
-        "security_group_id": sg_id,
+    "group": group_id,
+    "resources": {
         "node-01": {
+            "type": "ec2",
             "id": instance_id,
             "name": node_name,
             "vpc_id": vpc_id,
@@ -185,35 +182,100 @@ def setup_demo(group: str) -> dict:
             "security_group_id": sg_id,
         },
         "bucket-01": {
+            "type": "s3",
             "name": bucket_name,
             "region": "us-east-1",
         },
-    }
+    },
+}
 
     if isinstance(state, dict):
         state.update(inventory)
-        save(state)
+        save("data/inventory.json", state)
     else:
-        save(inventory)
+        save("data/inventory.json", inventory)
 
     return inventory
 
 
-def inject_fault(alias: str) -> None:
-    """Detiene el nodo o elimina una etiqueta del bucket de laboratorio.
 
-    Args:
-        alias: node-01 o bucket-01 presente en inventory.json.
-    Returns:
-        None cuando el fallo simulado se verifica mediante el SDK.
-    Raises:
-        ValidationError: Si el alias no pertenece al inventario.
-        NotImplementedError: Mientras falte TODO I6-A.
-    Side Effects:
-        Modifica únicamente el recurso de prueba de ese grupo.
-    """
-    # TODO I6-A: resolver el alias en inventario; jamás recibir InstanceId libre.
-    # node-01: stop_instances y comprobar stopped, con consultas limitadas.
-    # bucket-01: quitar Owner conservando el resto de etiquetas.
-    # Esta función fabrica el problema; no debe enviar el evento automáticamente.
-    raise NotImplementedError("I6-A: inyectar y comprobar fallo")
+def inject_fault(alias: str) -> None:
+    """Introduce y verifica un fallo controlado en un recurso autorizado."""
+
+    inventory = load("data/inventory.json")
+    resources = inventory.get("resources", {})
+
+    resource = resources.get(alias)
+
+    if not isinstance(resource, dict):
+        raise ValidationError("El alias no pertenece al inventario")
+
+    if alias == "node-01":
+        if resource.get("type") != "ec2":
+            raise ValidationError("El recurso no es una instancia EC2")
+
+        instance_id = resource.get("id")
+        if not instance_id:
+            raise ValidationError("La instancia no tiene un ID válido")
+
+        ec2 = client("ec2")
+
+        current = ec2.describe_instances(
+            InstanceIds=[instance_id]
+        )["Reservations"][0]["Instances"][0]["State"]["Name"]
+
+        if current != "stopped":
+            ec2.stop_instances(InstanceIds=[instance_id])
+
+        # Comprobar el estado con un límite de espera.
+        for _ in range(20):
+            response = ec2.describe_instances(
+                InstanceIds=[instance_id]
+            )
+            status = response["Reservations"][0]["Instances"][0]["State"]["Name"]
+
+            if status == "stopped":
+                return
+
+            time.sleep(1)
+
+        raise PermanentError("No se pudo verificar el estado stopped")
+
+    elif alias == "bucket-01":
+        if resource.get("type") != "s3":
+            raise ValidationError("El recurso no es un bucket S3")
+
+        bucket_name = resource.get("name")
+        if not bucket_name:
+            raise ValidationError("El bucket no tiene un nombre válido")
+
+        s3 = client("s3")
+
+        tags = s3.get_bucket_tagging(
+            Bucket=bucket_name
+        ).get("TagSet", [])
+
+        # Conservar todas las etiquetas excepto Owner.
+        remaining_tags = [
+            tag for tag in tags
+            if tag["Key"] != "Owner"
+        ]
+
+        if len(remaining_tags) != len(tags):
+            s3.put_bucket_tagging(
+                Bucket=bucket_name,
+                Tagging={"TagSet": remaining_tags},
+            )
+
+        # Verificar que Owner ya no exista.
+        verified_tags = s3.get_bucket_tagging(
+            Bucket=bucket_name
+        ).get("TagSet", [])
+
+        if any(tag["Key"] == "Owner" for tag in verified_tags):
+            raise PermanentError("No se pudo eliminar la etiqueta Owner")
+
+        return
+
+    raise ValidationError("Alias no permitido")
+
