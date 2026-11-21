@@ -1,0 +1,32 @@
+{
+  "evt-node-20261121-001": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-node-20261121-001",
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-11-21T03:07:00Z",
+      "simulate_failures": 0
+    },
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "repaired",
+    "notified": true,
+    "status": "acknowledged"
+  },
+  "evt-node-20261121-002": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-node-20261121-002",
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-11-21T03:07:00Z",
+      "simulate_failures": 0
+    },
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "notified": true,
+    "status": "acknowledged"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "group": "grupo01",
+  "resources": {
+    "node-01": {
+      "type": "ec2",
+      "id": "i-eefc033d5c36115d8",
+      "name": "fenix-grupo01-node-01",
+      "vpc_id": "vpc-13a3ae9f5743fa06c",
+      "image_id": "ami-00056ab1a7d829465",
+      "security_group_id": "sg-fc0b1439ad0bcf547"
+    },
+    "bucket-01": {
+      "type": "s3",
+      "name": "fenix-grupo01-demo",
+      "region": "us-east-1"
+    }
+  }
+}

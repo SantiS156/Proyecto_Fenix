@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 logs/
-data/
+data/*
+!data/
+!data/inventory.json
+!data/events.json
 *.pyc
 .vscode/
