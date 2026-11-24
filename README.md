@@ -20,9 +20,9 @@ Además, incorpora registro de eventos, manejo de errores, reintentos, notificac
 |---|---|---|---|---|
 | Integrante 1 | Lamas, Joel | joelcaiok@gmail.com | `utils/errors.py`, `utils/validation.py`, `services/events.py` | `test_i1.py` |
 | Integrante 2 | Cruz Vargas, Alex | Pendiente | Pendiente | Pendiente |
-| Integrante 3 | Mendez, Mateo Joaquin | mateojoaquinmendez1114@gmail.com |'utils/crypto.py', 'services/receiver.py', 'services/remediation.py'| 'test_base.py', 'test_fenix.py' |
+| Integrante 3 | Mendez, Mateo Joaquin | Pendiente | Pendiente | Pendiente |
 | Integrante 4 | Sosa, Santiago Ezequiel | santiagohsosa2019@gmail.com | `logging_json.py`, `notifications.py` | `test_i4.py` |
-| Integrante 5 | Lopez, Rocio Ayelen | Pendiente | Pendiente | Pendiente |
+| Integrante 5 | Lopez, Rocio Ayelen | rociolopez0281@gmail.com |  `services/worker.py`, `services/remediation.py`, `cli.py`, `data/events.json`| `test_i5_recovery.py` |
 
 
 
